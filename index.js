@@ -176,8 +176,20 @@ cron.schedule("40 22 * * *", async () => {
       );
 
     // 全員反応なら終了
-    if (late.length === 0)
-      return;
+if (late.length === 0) {
+
+  await client.pushMessage({
+    to: GROUP_ID,
+    messages: [
+      {
+        type: "text",
+        text: "全員起床済み 👍"
+      }
+    ]
+  });
+
+  return;
+}
 
     const message =
       createMentionText(late, users);

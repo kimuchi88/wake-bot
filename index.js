@@ -31,36 +31,56 @@ const USERS_FILE = "users.json";
 
 let users = {};
 
+// ===== users読み込み =====
 if (fs.existsSync(USERS_FILE)) {
-  users = JSON.parse(fs.readFileSync(USERS_FILE));
+
+  users = JSON.parse(
+    fs.readFileSync(USERS_FILE)
+  );
+
+  console.log("users loaded");
+  console.log(users);
 }
 
+// ===== users保存 =====
 function saveUsers() {
+
   fs.writeFileSync(
     USERS_FILE,
     JSON.stringify(users, null, 2)
   );
+
+  console.log("users saved");
+
+  console.log(users);
 }
 
 // ===== メンション生成 =====
 function createMentionText(ids, users) {
 
   let text = "未起床👇\n";
+
   let mentions = [];
+
   let index = text.length;
 
   ids.forEach(id => {
 
-    const name = users[id] || "不明";
-    const mentionText = `@${name}\n`;
+    const name =
+      users[id] || "不明";
+
+    const mentionText =
+      `@${name}\n`;
 
     mentions.push({
       index: index,
-      length: mentionText.length - 1,
+      length:
+        mentionText.length - 1,
       userId: id
     });
 
     text += mentionText;
+
     index += mentionText.length;
   });
 
@@ -76,43 +96,56 @@ function createMentionText(ids, users) {
 // ===== Webhook =====
 app.post("/webhook", async (req, res) => {
 
+  console.log("webhook received");
+
   try {
 
     for (const event of req.body.events) {
 
-      if (event.type === "message") {
+      // ===== messageのみ =====
+      if (event.type !== "message")
+        continue;
 
-        const userId = event.source.userId;
+      const userId =
+        event.source.userId;
 
-        // ===== 名前取得 =====
-        if (!users[userId]) {
+      // ===== 新規ユーザー =====
+      if (!users[userId]) {
 
-          try {
+        try {
 
-            const profile =
-              await client.getGroupMemberProfile(
-                event.source.groupId,
-                userId
-              );
+          const profile =
+            await client.getGroupMemberProfile(
+              event.source.groupId,
+              userId
+            );
 
-            users[userId] =
-              profile.displayName;
+          users[userId] =
+            profile.displayName;
 
-            saveUsers();
+          saveUsers();
 
-          } catch {
+        } catch (err) {
 
-            users[userId] = "不明";
-            saveUsers();
-          }
+          console.log(err);
+
+          users[userId] = "不明";
+
+          saveUsers();
         }
+      }
 
-        // ===== 起床 =====
-        if (event.message.text === "起きた") {
+      // ===== 起床 =====
+      if (
+        event.message.text ===
+        "起きた"
+      ) {
 
-          awake[userId] = true;
+        awake[userId] = true;
 
-        }
+        console.log(
+          `${users[userId]} awake`
+        );
       }
     }
 
@@ -120,7 +153,8 @@ app.post("/webhook", async (req, res) => {
 
   } catch (err) {
 
-    console.error(err);
+    console.log(err);
+
     res.sendStatus(500);
   }
 });
@@ -129,34 +163,55 @@ app.post("/webhook", async (req, res) => {
 // UTCで22:40
 cron.schedule("40 22 * * *", async () => {
 
-  // users空なら停止
-  if (Object.keys(users).length === 0)
+  console.log("cron fired");
+
+  // ===== users空 =====
+  if (
+    Object.keys(users).length === 0
+  ) {
+
+    console.log("users empty");
+
     return;
+  }
 
   awake = {};
 
   // ===== 起床ボタン =====
-  await client.pushMessage({
-    to: GROUP_ID,
-    messages: [
-      {
-        type: "template",
-        altText: "起床チェック",
-        template: {
-          type: "buttons",
-          text:
-            "起きてる人は押して👇（5分以内）",
-          actions: [
-            {
-              type: "message",
-              label: "起きた",
-              text: "起きた"
+  try {
+
+    await client.pushMessage({
+      pushMessageRequest: {
+        to: GROUP_ID,
+        messages: [
+          {
+            type: "template",
+            altText: "起床チェック",
+            template: {
+              type: "buttons",
+              text:
+                "起きてる人は押して👇（5分以内）",
+              actions: [
+                {
+                  type: "message",
+                  label: "起きた",
+                  text: "起きた"
+                }
+              ]
             }
-          ]
-        }
+          }
+        ]
       }
-    ]
-  });
+    });
+
+    console.log("button sent");
+
+  } catch (err) {
+
+    console.log("push error");
+
+    console.log(err);
+  }
 
   // ===== 5分後 =====
   setTimeout(async () => {
@@ -166,18 +221,43 @@ cron.schedule("40 22 * * *", async () => {
         id => !awake[id]
       );
 
-    // 全員反応なら終了
-　　if (late.length === 0) {
-  　　return;
-　　}
+    // ===== 全員起床 =====
+    if (late.length === 0) {
 
-    const message =
-      createMentionText(late, users);
+      console.log(
+        "everyone awake"
+      );
 
-    await client.pushMessage({
-      to: GROUP_ID,
-      messages: [message]
-    });
+      return;
+    }
+
+    try {
+
+      const message =
+        createMentionText(
+          late,
+          users
+        );
+
+      await client.pushMessage({
+        pushMessageRequest: {
+          to: GROUP_ID,
+          messages: [message]
+        }
+      });
+
+      console.log(
+        "mention sent"
+      );
+
+    } catch (err) {
+
+      console.log(
+        "mention error"
+      );
+
+      console.log(err);
+    }
 
   }, 5 * 60 * 1000);
 
@@ -188,5 +268,6 @@ const PORT =
   process.env.PORT || 3000;
 
 app.listen(PORT, () => {
+
   console.log("running");
 });
